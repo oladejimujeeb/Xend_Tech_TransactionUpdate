@@ -1,5 +1,6 @@
 ﻿using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.Caching.Memory;
 using System.ComponentModel.DataAnnotations;
 using UpdateTransaction.Core.DTO;
 using UpdateTransaction.Core.Interfaces.ServiceInterface;
@@ -11,22 +12,44 @@ namespace TransactionUpdateAPI.Controllers
     public class WalletTransactionController : ControllerBase
     {
         private readonly IWalletTransactionService _walletTransactionService;
+        private readonly IMemoryCache _memoryCache;
+        private const string Key = "transactionCache";
 
-        public WalletTransactionController(IWalletTransactionService walletTransactionService)
+        public WalletTransactionController(IWalletTransactionService walletTransactionService, IMemoryCache memoryCache)
         {
             _walletTransactionService = walletTransactionService;
+            _memoryCache = memoryCache;
         }
         [HttpGet]
         [ProducesResponseType(typeof(BaseResponseModel<IEnumerable<AllWalletTransactionVIewModel>>), 200)]
         [ProducesResponseType(typeof(string), 400)]
         public async Task<IActionResult>WalletTransactions()
         {
-            var transaction = await _walletTransactionService.GetAllWalletTransaction();
-            if(!transaction.Status)
+            BaseResponseModel<IEnumerable<AllWalletTransactionVIewModel>> transactions;
+            if (!_memoryCache.TryGetValue(Key, out transactions))
             {
-                return BadRequest(transaction.Message);
+                transactions = await _walletTransactionService.GetAllWalletTransaction(); //Get the data from database
+
+                var option = new MemoryCacheEntryOptions
+                {
+                    SlidingExpiration = TimeSpan.FromSeconds(90),
+                    Size = 1024,
+                    AbsoluteExpirationRelativeToNow = TimeSpan.FromMinutes(3)
+                };
+
+                _memoryCache.Set(Key, transactions, option);
+                if (!transactions.Status)
+                {
+                    return BadRequest(transactions.Message);
+                }
+                return Ok(transactions);
             }
-            return Ok(transaction);
+            Thread.Sleep(2000);
+            if (!transactions.Status)
+            {
+                return BadRequest(transactions.Message);
+            }
+            return Ok(transactions);
         }
         [HttpGet("{transactionId}")]
         [ProducesResponseType(typeof(BaseResponseModel<WalletTransactionVIewModel>), 200)]
