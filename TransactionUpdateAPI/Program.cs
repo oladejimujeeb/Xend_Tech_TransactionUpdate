@@ -42,6 +42,10 @@ builder.Services.AddScoped<IClientService, ClientService>();
 builder.Services.AddScoped<ITransactionBusMessage, TransactionBusMessage>();
 builder.Services.AddHealthChecks();
 builder.Services.AddMemoryCache();
+builder.Services.AddStackExchangeRedisCache(options=> 
+{
+    options.Configuration = "localhost:6379";
+});
 
 var app = builder.Build();
 

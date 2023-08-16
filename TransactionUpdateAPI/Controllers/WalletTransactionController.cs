@@ -1,7 +1,10 @@
 ﻿using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.Caching.Distributed;
 using Microsoft.Extensions.Caching.Memory;
+using Newtonsoft.Json;
 using System.ComponentModel.DataAnnotations;
+using System.Text;
 using UpdateTransaction.Core.DTO;
 using UpdateTransaction.Core.Interfaces.ServiceInterface;
 
@@ -13,12 +16,14 @@ namespace TransactionUpdateAPI.Controllers
     {
         private readonly IWalletTransactionService _walletTransactionService;
         private readonly IMemoryCache _memoryCache;
+        private readonly IDistributedCache _distributedCache;
         private const string Key = "transactionCache";
 
-        public WalletTransactionController(IWalletTransactionService walletTransactionService, IMemoryCache memoryCache)
+        public WalletTransactionController(IWalletTransactionService walletTransactionService, IMemoryCache memoryCache, IDistributedCache distributedCache)
         {
             _walletTransactionService = walletTransactionService;
             _memoryCache = memoryCache;
+            _distributedCache = distributedCache;
         }
         [HttpGet]
         [ProducesResponseType(typeof(BaseResponseModel<IEnumerable<AllWalletTransactionVIewModel>>), 200)]
@@ -49,6 +54,36 @@ namespace TransactionUpdateAPI.Controllers
             {
                 return BadRequest(transactions.Message);
             }
+            return Ok(transactions);
+        }
+        [HttpGet("reddis")]
+        [ProducesResponseType(typeof(BaseResponseModel<IEnumerable<AllWalletTransactionVIewModel>>), 200)]
+        [ProducesResponseType(typeof(string), 400)]
+        public async Task<IActionResult> WalletTransactionsReddis()
+        {
+            BaseResponseModel<IEnumerable<AllWalletTransactionVIewModel>>? transactions;
+            string? serializeWalletTransaction = null;
+            var reddisWalletTransaction = await _distributedCache.GetAsync(Key);
+            if (reddisWalletTransaction is not null)
+            {
+                serializeWalletTransaction = Encoding.UTF8.GetString(reddisWalletTransaction);
+                BaseResponseModel<IEnumerable<AllWalletTransactionVIewModel>>? baseResponseModel = JsonConvert.DeserializeObject<BaseResponseModel<IEnumerable<AllWalletTransactionVIewModel>>>(serializeWalletTransaction);
+                transactions = baseResponseModel;
+            }
+            else
+            {
+                transactions = await _walletTransactionService.GetAllWalletTransaction(); //Get the data from database
+                serializeWalletTransaction = JsonConvert.SerializeObject(transactions);
+
+                reddisWalletTransaction = Encoding.UTF8.GetBytes(serializeWalletTransaction);
+                var options = new DistributedCacheEntryOptions()
+                {
+                    SlidingExpiration = TimeSpan.FromMinutes(3),
+                    AbsoluteExpiration = DateTime.Now.AddMinutes(10)
+                };
+                await _distributedCache.SetAsync(Key,reddisWalletTransaction, options);                 
+            }
+           
             return Ok(transactions);
         }
         [HttpGet("{transactionId}")]
